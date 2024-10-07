@@ -1,0 +1,777 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Marching Cubes</title>
+
+  <style type="text/css">
+    body, html {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background-color: #252525;
+    }
+
+    canvas {
+      background-color: darksalmon;
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
+  </style>
+
+</head>
+<body>
+  <canvas id="wgpu-canvas"></canvas>
+
+  <script type="module">
+    import { mat4, vec4, vec3 } from 'https://cdn.skypack.dev/gl-matrix';
+    import { Pane } from 'https://cdn.jsdelivr.net/npm/tweakpane@4.0.4/dist/tweakpane.min.js';
+
+    import { Camera } from './js/Camera.js';
+    import { ArcBallController } from './js/ViewController.js';
+    import { clamp, degToRad, fetchTextureFromURL } from './js/utils.js';
+    import PerfLogger from './js/PerfLogger.js';
+
+    import * as ParallelMarchingCube from './js/parallel-marching-cube.js';
+    import * as ShaderUtils from './js/shader-utils.js';
+
+    // -------------------------------------------
+
+    const densityShader = `
+      ${ShaderUtils.SignedDistanceFunctions}
+      ${ShaderUtils.SimplexPerlinNoise}
+
+      struct DensityUniformAttribute {
+        time: f32,
+        unionSmoothness: f32,
+        ringVariation: f32,
+        control2: f32,
+      };
+
+      @group(2) @binding(0) var<uniform> uAttributes: DensityUniformAttribute;
+
+      fn computeDensityNormal(p: vec3<f32>) -> vec3<f32> {
+        let eps: f32 = 0.001;
+        let ex = vec3<f32>(eps, 0.0, 0.0);
+        let ey = vec3<f32>(0.0, eps, 0.0);
+        let ez = vec3<f32>(0.0, 0.0, eps);
+
+        let nx = computeDensity(p + ex) - computeDensity(p - ex);
+        let ny = computeDensity(p + ey) - computeDensity(p - ey);
+        let nz = computeDensity(p + ez) - computeDensity(p - ez);
+
+        return normalize(vec3<f32>(nx, ny, nz));
+      }
+
+      fn rotateAxisAngle(_axis: vec3f, angle: f32) -> mat3x3f {
+        let axis = normalize(_axis);
+        let c = cos(angle);
+        let s = sin(angle);
+        let t = 1.0 - c;
+        
+        return mat3x3f(
+          t * axis.x * axis.x + c, t * axis.x * axis.y - s * axis.z,  t * axis.x * axis.z + s * axis.y,
+          t * axis.x * axis.y + s * axis.z,  t * axis.y * axis.y + c,        t * axis.y * axis.z - s * axis.x,
+          t * axis.x * axis.z - s * axis.y,  t * axis.y * axis.z + s * axis.x,  t * axis.z * axis.z + c
+        );
+      }
+
+      // [User defined distance function]
+      fn computeDensity(ws: vec3f) -> f32 {
+        var d = 0.0;
+        var p = ws;
+        let radius = 8.0;
+
+        let axis = vec3f(1, 0, 1);
+        p = rotateAxisAngle(axis, 3.14/4.0) * p; 
+
+        let sineTime = sin(uAttributes.time);
+        d = udRoundBox(p, vec3f(radius), 0.125*radius + 0.25*sineTime);
+
+        let hs = 0.40;
+        let helix = vec2f(cos(hs * ws.y), sin(hs * ws.y));
+        d += opIntersection(dot(helix, hs * ws.xz), d);
+
+        p = ws.yzx;
+        // p = rotateAxisAngle(vec3f(1, 1, 0), 0.5 * uAttributes.time) * p;
+
+        d = opSmoothUnion(
+          d,
+          sdTorus(p, vec2f((2.1 + 0.0 * sineTime)*radius, 2.0f + uAttributes.ringVariation * sineTime)),
+          1.0 - uAttributes.unionSmoothness
+        );
+
+        return d;
+      }
+    `;
+
+    const camera = new Camera();
+    const arcball = new ArcBallController();
+    const modelMatrix = mat4.create();
+
+    // -------------------------------------------
+
+    async function initWebGPU() {
+      if (!navigator.gpu) {
+        console.error("WebGPU is not supported in this browser.");
+        return;
+      }
+
+      const adapter = await navigator.gpu.requestAdapter();
+      if (!adapter) {
+        console.error("WebGPU is supported by this browser but currently disabled.");
+        return;
+      }
+
+      const device = await adapter.requestDevice();
+      device.lost.then((info) => {
+        console.error(`WebGPU device was lost: ${info.message}`);
+        if (info.reason !== 'destroyed') {
+          initWebGPU();
+        }
+      });
+
+      // -- Canvas setting.
+
+      const canvas = document.getElementById("wgpu-canvas");
+      canvas.oncontextmenu = () => false;
+
+      const devicePixelRatio = window.devicePixelRatio || 1;
+      canvas.width = canvas.clientWidth * devicePixelRatio;
+      canvas.height = canvas.clientHeight * devicePixelRatio;
+
+      let depthTexture = null;
+      const setupDepthTexture = () => {
+        if (depthTexture) {
+          depthTexture.destroy();
+        }
+        depthTexture = device.createTexture({
+          size: {
+            width: canvas.width,
+            height: canvas.height,
+            depthOrArrayLayers: 1
+          },
+          format: 'depth24plus',
+          usage: GPUTextureUsage.RENDER_ATTACHMENT
+               | GPUTextureUsage.TEXTURE_BINDING
+        });
+      }
+
+      const onResize = () => {
+        setupDepthTexture();
+        camera.setPerspective(degToRad(60.0), canvas.width, canvas.height, 0.1, 200.0);
+      }
+      onResize();
+
+      // Callbacks for surfaces resize.
+      const resizeCanvas = () => {
+        const width = window.innerWidth;
+        const height = window.innerHeight;
+        const w = parseInt(clamp(device.limits.maxTextureDimension2D, 1, width));
+        const h = parseInt(clamp(device.limits.maxTextureDimension2D, 1, height));
+
+        if ((w != canvas.width) || (h != canvas.height)) {
+          canvas.width = w;
+          canvas.height = h;
+          onResize();
+        }
+      }
+      window.addEventListener('resize', resizeCanvas);
+
+      const observer = new ResizeObserver(entries => {
+        for (const entry of entries) {
+          const canvas = entry.target;
+          const width = entry.contentBoxSize[0].inlineSize;
+          const height = entry.contentBoxSize[0].blockSize;
+          const w = parseInt(clamp(device.limits.maxTextureDimension2D, 1, width));
+          const h = parseInt(clamp(device.limits.maxTextureDimension2D, 1, height));
+
+          if ((w != canvas.width) || (h != canvas.height)) {
+            canvas.width = w;
+            canvas.height = h;
+            onResize();
+          }
+        }
+      });
+      observer.observe(canvas);
+
+      const context = canvas.getContext("webgpu");
+      const presentFormat = navigator.gpu.getPreferredCanvasFormat();
+      context.configure({
+        device: device,
+        format: presentFormat,
+      });
+
+      // -- Camera setting.
+
+      arcball.setEvents(canvas);
+      arcball.setView(Math.PI / 2.0, Math.PI / 16, false);
+      arcball.setDolly(35.0, false);
+      camera.setController(arcball);
+
+      // -- UI.
+
+      const pane = new Pane({
+        title: document.title.split('|')[0],
+      });
+
+      const uiParams = {
+        unionSmoothness: 0.5,
+        ringVariation: 0.0,
+      };
+      pane.addBinding(uiParams, 'unionSmoothness', {min:0.0, max:0.95});
+      pane.addBinding(uiParams, 'ringVariation', {min:0, max:2.0});
+
+      // -- Density function bind group & uniform.
+
+      const density_uniformBuffer = device.createBuffer({
+        size: 4 * Float32Array.BYTES_PER_ELEMENT,
+        usage: GPUBufferUsage.UNIFORM
+             | GPUBufferUsage.COPY_DST,
+      });
+
+      const density_bindGroupLayout = device.createBindGroupLayout({
+        entries: [{
+          binding: 0,
+          visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT | GPUShaderStage.COMPUTE,
+          buffer: { type: 'uniform' }
+        }]
+      });
+
+      const density = {
+        shader: densityShader,
+        uniformBuffer: density_uniformBuffer,
+        bindGroupLayout: density_bindGroupLayout,
+        bindGroup: device.createBindGroup({
+          layout: density_bindGroupLayout,
+          entries: [{
+            binding: 0,
+            resource: {
+              buffer: density_uniformBuffer,
+            }
+          }]
+        }),
+      };
+
+      // -- Rendering pipeline.
+
+      // Uniform buffer.
+      const uniformData = new Float32Array(
+        2 * modelMatrix.length
+      + 3 * Float32Array.BYTES_PER_ELEMENT
+      );
+      const uniformBuffer = device.createBuffer({
+        size: uniformData.byteLength,
+        usage: GPUBufferUsage.UNIFORM
+             | GPUBufferUsage.COPY_DST,
+      });
+
+      // Textures.
+      const [textureGround, textureMud, textureRock] = await Promise.all([
+        fetchTextureFromURL(device, './textures/coast_sand_rocks_02_diff_1k.jpg' ),
+        fetchTextureFromURL(device, './textures/mud_cracked_dry_03_diff_1k.jpg' ),
+        fetchTextureFromURL(device, './textures/rock_face_03_diff_1k.jpg' ),
+      ]);
+      const [textureGroundNormal, textureMudNormal, textureRockNormal] = await Promise.all([
+        fetchTextureFromURL(device, './textures/coast_sand_rocks_02_nor_gl_1k.png'),
+        fetchTextureFromURL(device, './textures/mud_cracked_dry_03_nor_gl_1k.png'),
+        fetchTextureFromURL(device, './textures/rock_face_03_nor_gl_1k.png'),
+      ]);
+      const [textureGroundHeight, textureMudHeight, textureRockHeight] = await Promise.all([
+        fetchTextureFromURL(device, './textures/coast_sand_rocks_02_disp_1k.png'),
+        fetchTextureFromURL(device, './textures/mud_cracked_dry_03_disp_1k.png'),
+        fetchTextureFromURL(device, './textures/rock_face_03_disp_1k.png'),
+      ]);
+
+      const linearRepeatSampler = device.createSampler({
+        addressModeU: 'repeat',
+        addressModeV: 'repeat',
+        magFilter: 'linear',
+        minFilter: 'linear',
+        mipmapFilter: 'linear',
+      });
+
+      const vertexShaderCode = `
+        struct UniformData {
+          modelMatrix: mat4x4f,
+          viewProjectionMatrix: mat4x4f,
+          eyePosition: vec3f,
+        }
+        @group(0) @binding(0) var<uniform> uData: UniformData;
+
+        struct VertexOutput {
+          @builtin(position) Position: vec4f,
+          @location(0) PositionWS: vec3f,
+          @location(1) NormalWS: vec3f,
+          @location(2) AO: f32,
+        }
+
+        @vertex
+        fn main(
+          @location(0) vPositionAO: vec4f,
+          @location(1) vNormal: vec4f,
+        ) -> VertexOutput {
+          var out : VertexOutput;
+          let posWS = uData.modelMatrix * vec4f(vPositionAO.xyz, 1.0);
+
+          out.Position = uData.viewProjectionMatrix * posWS;
+          out.PositionWS = posWS.xyz;
+          out.NormalWS = normalize((uData.modelMatrix * vNormal).xyz); //
+          out.AO = vPositionAO.w;
+
+          return out;
+        }
+      `;
+
+      const fragmentShaderCode = `
+        struct UniformData {
+          modelMatrix: mat4x4f,
+          viewProjectionMatrix: mat4x4f,
+          eyePosition: vec3f,
+        }
+        @group(0) @binding(0) var<uniform> uData: UniformData;
+        @group(0) @binding(1) var uSampler: sampler;
+
+        @group(1) @binding(0) var uTextureGround: texture_2d<f32>;
+        @group(1) @binding(1) var uTextureMud: texture_2d<f32>;
+        @group(1) @binding(2) var uTextureRock: texture_2d<f32>;
+
+        @group(1) @binding(3) var uTextureGroundNormal: texture_2d<f32>;
+        @group(1) @binding(4) var uTextureMudNormal: texture_2d<f32>;
+        @group(1) @binding(5) var uTextureRockNormal: texture_2d<f32>;
+
+        @group(1) @binding(6) var uTextureGroundHeight: texture_2d<f32>;
+        @group(1) @binding(7) var uTextureMudHeight: texture_2d<f32>;
+        @group(1) @binding(8) var uTextureRockHeight: texture_2d<f32>;
+
+        fn computeBasis(normal: vec3f) -> mat3x3f {
+          let n = abs(normal);
+          var tangent: vec3f;
+          if (n.x > n.y && n.x > n.z) {
+            tangent = vec3(0.0, 1.0, 0.0);
+          } else if (n.y > n.x && n.y > n.z) {
+            tangent = vec3(0.0, 0.0, 1.0);
+          } else {
+            tangent = vec3(1.0, 0.0, 0.0);
+          }
+          let bitangent = cross(normal, tangent);
+          tangent = cross(bitangent, normal);
+
+          return mat3x3f(tangent, bitangent, normal);
+        }
+
+        fn triplanarSampling(
+          texCoord: vec3f,
+          normal: vec3f,
+          tX: texture_2d<f32>,
+          tY: texture_2d<f32>,
+          tZ: texture_2d<f32>,
+        ) -> mat3x3f {
+          let X = textureSample(tX, uSampler, texCoord.yz).rgb;
+          let Y = mix(
+            textureSample(tX, uSampler, texCoord.zx).rgb,
+            textureSample(tY, uSampler, texCoord.zx).rgb,
+            smoothstep(-0.8, 0.8, normal.y)
+          );
+          let Z = mix(
+            textureSample(tX, uSampler, texCoord.xy).rgb,
+            textureSample(tZ, uSampler, texCoord.xy).rgb,
+            smoothstep(-0.25, 0.75, min(normal.z, normal.y))
+          ); 
+          return mat3x3f(X, Y, Z);
+        }
+
+        @fragment
+        fn main(
+          @location(0) inPositionWS: vec3f,
+          @location(1) inNormalWS: vec3f,
+          @location(2) inAO: f32
+        ) -> @location(0) vec4f 
+        {
+          let n = 0.0;//(0.05*fbm_3d(40.0 * inPositionWS)); //
+          var normal = normalize(inNormalWS + 0.00*n);
+          var position = inPositionWS;
+
+          let viewDirection = normalize(position - uData.eyePosition);
+
+          // ------------
+          // [reflection POC]
+          let clearColor = vec3f(0.4, 0.38, 0.32);
+          var useClear = false;
+          // if (normal.y > (0.975 + 0.05*n)) 
+          // {
+          //   let rnor = normalize(normal + 0.2*n);
+          //   let rdir = viewDirection;
+          //   let v = normalize(reflect(rdir, rnor));
+          //   var curr = position + 1*v;
+          //   var d = computeDensity(curr);
+          //   var steps = 64;
+          //   while ((d > 0.0001) && (steps > 0)) {
+          //     curr +=  d * v;
+          //     d = computeDensity(curr);
+          //     steps -= 1;
+          //   }
+          //   useClear = (steps <= 0 || d <= 0);
+          //   position = curr;
+          //   normal = computeDensityNormal(position);
+          // }
+          // ------------
+
+          let Basis = computeBasis(normal); //
+          let texCoord = 3.1 * (position + 8.0) / 16.0;
+          var albedo = vec3f(1.0);
+
+          // Determine triplanar mapping weights [could be done on the VS].
+          var blendWeights = pow((abs(normal) - 0.2) * 7.0, vec3f(1.5));
+          blendWeights = max(vec3f(0), blendWeights);
+          blendWeights /= dot(blendWeights, vec3f(1.0f));
+
+          // Apply triplanar mapping for albedo.
+          let Albedos = triplanarSampling(
+            texCoord, normal,
+            uTextureRock, uTextureGround, uTextureMud
+          );
+          albedo = Albedos[0] * blendWeights.x
+                 + Albedos[1] * blendWeights.y
+                 + Albedos[2] * blendWeights.z
+                 ;
+
+          // Calculate detail normal map.
+          if (true) 
+          {
+            var Normals = triplanarSampling(
+              texCoord, normal, 
+              uTextureRockNormal, uTextureGroundNormal, uTextureMudNormal
+            );
+            Normals[0] = normalize(2.0 * Normals[0] - 1.0);
+            Normals[1] = normalize(2.0 * Normals[1] - 1.0);
+            Normals[2] = normalize(2.0 * Normals[2] - 1.0);
+
+            normal = Normals[0] * blendWeights.x
+                   + Normals[1] * blendWeights.y
+                   + Normals[2] * blendWeights.z
+                   ;
+
+            normal = normalize(Basis * normal);
+          }
+          let normalColor = (normal + 1.0) / 2.0;
+
+          var fakeLight = saturate(
+                0.25 + 1.0 
+              * (0.2 + 0.6*blendWeights.y + 0.2*blendWeights.z) 
+              * inAO 
+              * (0.75 + saturate(dot(normal, normalize(vec3f(1.0)))))
+          );
+
+          if (useClear) {
+            fakeLight = 1.0;
+            albedo = clearColor;
+          }
+
+          let rgb = vec3f(1.0)
+                  // * normalColor
+                  // * abs(position/8.0)
+                  * inAO
+                  * fakeLight
+                  * albedo
+                  ;
+
+          return vec4f(rgb, 1.0);
+        }
+
+        // [optionnal, to test reflection]
+        // ${densityShader}
+      `;
+
+
+      const bindGroupLayout = device.createBindGroupLayout({
+        entries: [{
+          binding: 0,
+          visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT,
+          buffer: { type: 'uniform' }
+        },
+        {
+          binding: 1,
+          visibility: GPUShaderStage.FRAGMENT,
+          sampler: {
+            type: 'filtering',
+          }
+        }]
+      });
+
+      const bindGroupLayoutTexture = device.createBindGroupLayout({
+        entries: [{
+          binding: 0,
+          visibility: GPUShaderStage.FRAGMENT,
+          texture: {
+            multisampled: false,
+            sampleType: 'float',
+          }
+        },
+        {
+          binding: 1,
+          visibility: GPUShaderStage.FRAGMENT,
+          texture: {
+            multisampled: false,
+            sampleType: 'float',
+          }
+        },
+        {
+          binding: 2,
+          visibility: GPUShaderStage.FRAGMENT,
+          texture: {
+            multisampled: false,
+            sampleType: 'float',
+          }
+        },
+        {
+          binding: 3,
+          visibility: GPUShaderStage.FRAGMENT,
+          texture: {
+            multisampled: false,
+            sampleType: 'float',
+          }
+        },
+        {
+          binding: 4,
+          visibility: GPUShaderStage.FRAGMENT,
+          texture: {
+            multisampled: false,
+            sampleType: 'float',
+          }
+        },
+        {
+          binding: 5,
+          visibility: GPUShaderStage.FRAGMENT,
+          texture: {
+            multisampled: false,
+            sampleType: 'float',
+          }
+        },
+        {
+          binding: 6,
+          visibility: GPUShaderStage.FRAGMENT,
+          texture: {
+            multisampled: false,
+            sampleType: 'float',
+          }
+        },
+        {
+          binding: 7,
+          visibility: GPUShaderStage.FRAGMENT,
+          texture: {
+            multisampled: false,
+            sampleType: 'float',
+          }
+        },
+        {
+          binding: 8,
+          visibility: GPUShaderStage.FRAGMENT,
+          texture: {
+            multisampled: false,
+            sampleType: 'float',
+          }
+        },]
+      });
+
+      const renderPipeline = device.createRenderPipeline({
+        layout: device.createPipelineLayout({
+          bindGroupLayouts: [
+            bindGroupLayout,
+            bindGroupLayoutTexture,
+            density.bindGroupLayout,
+          ]
+        }),
+        vertex: {
+          module: device.createShaderModule({
+            code: vertexShaderCode
+          }),
+          entryPoint: 'main',
+          buffers: [{
+            arrayStride: Float32Array.BYTES_PER_ELEMENT * (4 + 4), //
+            attributes: [
+            {
+              // position
+              shaderLocation: 0,
+              offset: 0,
+              format: 'float32x4',
+            },
+            {
+              // normal
+              shaderLocation: 1,
+              offset: Float32Array.BYTES_PER_ELEMENT * 4, //
+              format: 'float32x4',
+            }],
+          }],
+        },
+        fragment: {
+          module: device.createShaderModule({
+            code: fragmentShaderCode
+          }),
+          entryPoint: 'main',
+          targets: [{
+            format: presentFormat,
+          }],
+        },
+        primitive: {
+          topology: 'triangle-list',
+          cullMode: 'back',
+          frontFace: 'ccw',
+        },
+        depthStencil: {
+          format: 'depth24plus',
+          depthWriteEnabled: true,
+          depthCompare: 'less'
+        }
+      });
+
+      // --------------
+
+      const bindGroup = device.createBindGroup({
+        layout: bindGroupLayout,
+        entries: [{
+          binding: 0,
+          resource: {
+            buffer: uniformBuffer,
+          },
+        },
+        {
+          binding: 1,
+          resource: linearRepeatSampler,
+        },
+        ]
+      });
+
+      const bindGroupTexture = device.createBindGroup({
+        layout: bindGroupLayoutTexture,
+        entries: [
+          {
+            binding: 0,
+            resource: textureGround.createView(),
+          },
+          {
+            binding: 1,
+            resource: textureMud.createView(),
+          },
+          {
+            binding: 2,
+            resource: textureRock.createView(),
+          },
+          {
+            binding: 3,
+            resource: textureGroundNormal.createView(),
+          },
+          {
+            binding: 4,
+            resource: textureMudNormal.createView(),
+          },
+          {
+            binding: 5,
+            resource: textureRockNormal.createView(),
+          },
+          {
+            binding: 6,
+            resource: textureGroundHeight.createView(),
+          },
+          {
+            binding: 7,
+            resource: textureMudHeight.createView(),
+          },
+          {
+            binding: 8,
+            resource: textureRockHeight.createView(),
+          },
+        ]
+      });
+
+      // --------------
+
+      // -- Marching Cube generator & grid.
+
+      const generator = new ParallelMarchingCube.Generator();
+      const grid = generator.newGrid([4, 4, 4]);
+      const perf = new PerfLogger();
+
+      // Intialize the marching cube generator device data.      
+      await generator.init(device, density);
+      await grid.init();
+
+      // --------------
+
+      let firstTick = Date.now() / 1000.0;
+      let lastTick = firstTick;
+
+      function frame() {
+        const tick = Date.now() / 1000.0;
+        const dt = tick - lastTick;
+        lastTick = tick;
+
+        const densityAtttribs = new Float32Array([
+          tick - firstTick,
+          uiParams.unionSmoothness,
+          uiParams.ringVariation,
+        ]);
+        device.queue.writeBuffer(density_uniformBuffer, 0, densityAtttribs.buffer, densityAtttribs.byteOffset, densityAtttribs.byteLength);
+        
+        camera.update(dt);
+
+        // Update uniform device buffer.
+        uniformData.set(modelMatrix, 0);
+        uniformData.set(camera.viewproj(), modelMatrix.length);
+        uniformData.set(camera.position(), modelMatrix.length * 2)
+        device.queue.writeBuffer(
+          uniformBuffer,
+          0,
+          uniformData.buffer,
+          uniformData.byteOffset,
+          uniformData.byteLength
+        );
+
+        grid.build();
+
+        // Rendering.
+        {
+          const commandEncoder = device.createCommandEncoder();
+
+          const passEncoder = commandEncoder.beginRenderPass({
+            colorAttachments: [{
+              view: context.getCurrentTexture().createView(),
+              loadOp: 'clear',
+              clearValue: {r: 0.4, g: 0.38, b: 0.32, a: 1.0},
+              storeOp: 'store',
+            }],
+            depthStencilAttachment: {
+              view: depthTexture.createView({format: 'depth24plus'}),
+              depthClearValue: 1.0,
+              depthLoadOp: 'clear',
+              depthStoreOp: 'store',
+            },
+          });
+          
+          passEncoder.setPipeline(renderPipeline);
+          passEncoder.setBindGroup(0, bindGroup);
+          passEncoder.setBindGroup(1, bindGroupTexture);
+          passEncoder.setBindGroup(2, density.bindGroup);
+          
+          grid.draw(passEncoder);
+
+          passEncoder.end();
+
+          device.queue.submit([commandEncoder.finish()]);
+        }
+
+        requestAnimationFrame(frame);
+      }
+
+      requestAnimationFrame(frame);
+    }
+
+    window.addEventListener("load", initWebGPU);
+  </script>
+</body>
+</html>

@@ -91,7 +91,7 @@
         p = rotateAxisAngle(axis, 3.14/4.0) * p; 
 
         let sineTime = sin(uAttributes.time);
-        d = udRoundBox(p, vec3f(radius), 0.125*radius + 0.25*sineTime);
+        d = udRoundBox(p, vec3f(radius), 0.125*radius + 0.0*sineTime);
 
         let hs = 0.40;
         let helix = vec2f(cos(hs * ws.y), sin(hs * ws.y));

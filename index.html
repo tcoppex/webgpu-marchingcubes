@@ -50,7 +50,7 @@
         time: f32,
         unionSmoothness: f32,
         ringVariation: f32,
-        control2: f32,
+        rotationSpeed: f32,
       };
 
       @group(2) @binding(0) var<uniform> uAttributes: DensityUniformAttribute;
@@ -98,7 +98,7 @@
         d += opIntersection(dot(helix, hs * ws.xz), d);
 
         p = ws.yzx;
-        // p = rotateAxisAngle(vec3f(1, 1, 0), 0.5 * uAttributes.time) * p;
+        p = rotateAxisAngle(vec3f(1, 1, 1), uAttributes.rotationSpeed * uAttributes.time) * p;
 
         d = opSmoothUnion(
           d,
@@ -223,9 +223,11 @@
       const uiParams = {
         unionSmoothness: 0.5,
         ringVariation: 0.0,
+        rotationSpeed: 0.0,
       };
       pane.addBinding(uiParams, 'unionSmoothness', {min:0.0, max:0.95});
-      pane.addBinding(uiParams, 'ringVariation', {min:0, max:2.0});
+      pane.addBinding(uiParams, 'ringVariation', {min:0.0, max:2.0});
+      pane.addBinding(uiParams, 'rotationSpeed', {min:0.0, max:1.0});
 
       // -- Density function bind group & uniform.
 
@@ -705,12 +707,14 @@
       function frame() {
         const tick = Date.now() / 1000.0;
         const dt = tick - lastTick;
+        const elapsedTime = tick - firstTick;
         lastTick = tick;
 
         const densityAtttribs = new Float32Array([
-          tick - firstTick,
+          elapsedTime,
           uiParams.unionSmoothness,
           uiParams.ringVariation,
+          uiParams.rotationSpeed,
         ]);
         device.queue.writeBuffer(density_uniformBuffer, 0, densityAtttribs.buffer, densityAtttribs.byteOffset, densityAtttribs.byteLength);
         

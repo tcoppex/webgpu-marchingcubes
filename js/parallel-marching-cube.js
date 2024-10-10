@@ -272,6 +272,11 @@ export class Generator {
       Utils.resetStorage(this.device, this.buffer.atomicCountVertices);
       Utils.resetStorage(this.device, this.buffer.atomicCountIndices);
 
+      Utils.resetStorage(this.device, this.buffer.nonEmptyCells); //
+      Utils.resetStorage(this.device, this.buffer.verticesToGenerate); //
+      Utils.resetStorage(this.device, this.buffer.vertices); //
+      Utils.resetStorage(this.device, this.buffer.indices); //
+
       Utils.clearTexture(this.device, this.vertexIndicesVolume); // [debug]
     }
 

@@ -141,6 +141,8 @@ export class Generator {
       dimension: '3d',
       format: 'r32uint',
       usage: GPUTextureUsage.STORAGE_BINDING
+           | GPUTextureUsage.TEXTURE_BINDING
+           ,
     });
 
     // ---------------------------
@@ -1276,7 +1278,7 @@ function generateIndices_PassInfo(
 
     @group(0) @binding(0) var<storage> inNumCells: u32;
     @group(0) @binding(1) var<storage> inNonEmptyCells: array<u32>;
-    @group(0) @binding(2) var inIndicesVolume: texture_storage_3d<${vertexIndicesVolume.format}, read>;
+    @group(0) @binding(2) var inIndicesVolume: texture_3d<u32>;
     @group(0) @binding(3) var<storage, read_write> atomicCount: atomic<u32>;
 
     @group(1) @binding(1) var<storage, read_write> outIndices: array<u32>;
@@ -1311,7 +1313,7 @@ function generateIndices_PassInfo(
           var edge_coords: vec3u = coords + vec3u(kEdgeStart[edge_id]);
           edge_coords.x = 3u * edge_coords.x + kEdgeAxis[edge_id];
 
-          let vertex_id: u32 = textureLoad(inIndicesVolume, edge_coords).r;
+          let vertex_id: u32 = textureLoad(inIndicesVolume, edge_coords, 0).r;
 
           outIndices[offset + 3u * i + j] = vertex_id;
         }
@@ -1339,10 +1341,10 @@ function generateIndices_PassInfo(
       {
         binding: 2,
         visibility: GPUShaderStage.COMPUTE,
-        storageTexture: {
-          access: 'read-only',
-          format: vertexIndicesVolume.format,
+        texture: {
+          sampleType: 'uint',
           viewDimension: vertexIndicesVolume.dimension,
+          multisampled: false,
         }
       },
       {
@@ -1375,7 +1377,7 @@ function generateIndices_PassInfo(
     entries: [
       { binding: 0, resource: { buffer: cellCountBuffer } },
       { binding: 1, resource: { buffer: nonEmptyCellsBuffer } },
-      { binding: 2, resource: vertexIndicesVolume.createView({dimension: '3d'}) },
+      { binding: 2, resource: vertexIndicesVolume.createView({dimension: vertexIndicesVolume.dimension}) },
       { binding: 3, resource: { buffer: atomicCountBuffer } },
     ]
   });

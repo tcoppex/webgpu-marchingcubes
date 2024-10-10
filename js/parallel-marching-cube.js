@@ -116,7 +116,7 @@ export class Generator {
 
     // [use 'rgba16float' to be able to use filtering, while only needing 'r16float']
     this.densityTexture = this.device.createTexture({
-      label: `densityTexture`,
+      label: `MarchingCubes::Generator::densityTexture`,
       size: {
         width: kDensityVolumeTexRes,
         height: kDensityVolumeTexRes,
@@ -132,7 +132,7 @@ export class Generator {
     // [use 3*width RED instead of RGB values to avoid concurrent texel store operations]
     // [we would use a 'r16uint' if it was compatible with storage_binding] 
     this.vertexIndicesVolume = this.device.createTexture({
-      label: `vertexIndicesVolume`,
+      label: `MarchingCubes::Generator::vertexIndicesVolume`,
       size: {
         width: 3 * kChunkDim,
         height: kChunkDim,
@@ -148,7 +148,7 @@ export class Generator {
     // ---------------------------
 
     this.chunkBindGroupLayout = this.device.createBindGroupLayout({
-      label: `ChunkBindGroupLayout`,
+      label: `MarchingCubes::Generator::ChunkBindGroupLayout`,
       entries: [
       // VERTICES
       { 
@@ -564,7 +564,6 @@ function buildDensityVolume_PassInfo(
 }
 
 
-
 function listNonEmptyCells_PassInfo(
   device,
   nearestSampler,
@@ -868,7 +867,7 @@ function splatVertexIndices_PassInfo(
       var coords: vec3u = data.xyz;
       coords.x = 3u * coords.x + u32(select(select(0u, 1u, edge == 0u), 2u, edge == 8u));
 
-      textureStore(outVertexIndicesVolume, coords, vec4u(vertex_id, 0, 0, 0));
+      textureStore(outVertexIndicesVolume, coords, vec4u(vertex_id, 0u, 0u, 0u));
     }
   `;
 
@@ -934,7 +933,6 @@ function splatVertexIndices_PassInfo(
     }
   }
 }
-
 
 
 function setupIndirectBuffer_PassInfo(
@@ -1014,6 +1012,7 @@ function setupIndirectBuffer_PassInfo(
     workgroupCount,
   }
 }
+
 
 function generateVertices_PassInfo(
   device,
@@ -1257,6 +1256,7 @@ function generateVertices_PassInfo(
     }
   }
 }
+
 
 function generateIndices_PassInfo(
   device,

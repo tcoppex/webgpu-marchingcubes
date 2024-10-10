@@ -340,8 +340,8 @@ class Grid {
     this.size = X * Y * Z;
     this.dimension = dimension;
     this.chunks = new Array(this.size).fill(null);
-    this.vertexBufferStride = Utils.alignTo256(kHeuristicChunkVerticesBufferSize);
-    this.indexBufferStride = Utils.alignTo256(kHeuristicChunkIndicesBufferSize);
+    this.vertexBufferStride = kHeuristicChunkVerticesBufferSize;
+    this.indexBufferStride = kHeuristicChunkIndicesBufferSize;
     this.uniformBufferStride = Utils.alignTo256(4 * Float32Array.BYTES_PER_ELEMENT); //
 
     const startPosition = dimension.map(d => - 0.5 * d);

@@ -708,7 +708,7 @@
 
       // --------------
 
-      function frame() {
+      async function frame() {
         const tick = Date.now() / 1000.0;
         const dt = tick - lastTick;
         const elapsedTime = tick - firstTick;
@@ -740,7 +740,7 @@
           uniformData.byteLength
         );
 
-        grid.build();
+        await grid.build();
 
         // Rendering.
         {

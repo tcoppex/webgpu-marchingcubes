@@ -271,6 +271,8 @@ export class Generator {
       Utils.resetStorage(this.device, this.buffer.atomicCountCells); 
       Utils.resetStorage(this.device, this.buffer.atomicCountVertices);
       Utils.resetStorage(this.device, this.buffer.atomicCountIndices);
+
+      Utils.clearTexture(this.device, this.vertexIndicesVolume); // [debug]
     }
 
     const extraBindGroups = [chunk.bindGroupInfo, this.densityBindGroupInfo];

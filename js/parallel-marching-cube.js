@@ -256,6 +256,7 @@ export class Generator {
     this.nearestSampler.destroy();
     this.linearSampler.destroy();
     this.densityTexture.destroy();
+    this.vertexIndicesVolume.destroy();
     this.passInfo = null;
   }
 
@@ -423,9 +424,6 @@ class Grid {
     }
     for (let chunk_id in this.chunks) {
       this.generator.buildChunk(this.chunks[chunk_id], this.buffer.drawIndexedIndirect);
-      // weirdly, this call *reduce* the performance time, especially when there is nothing inside,
-      // probably because it adds a bit of CPU latency avoiding a GPU stall.
-      await this.generator.DEBUG_readStaging();
     }
   }
 

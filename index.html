@@ -746,7 +746,10 @@
           uniformData.byteLength
         );
 
+        perf.log();
         await grid.build();
+        perf.log();
+        // perf.print(true);
 
         // Rendering.
         {

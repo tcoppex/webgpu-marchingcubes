@@ -271,7 +271,7 @@ export class Generator {
     }
 
     const extraBindGroups = [chunk.bindGroupInfo, this.densityBindGroupInfo];
-    const commandEncoder = this.device.createCommandEncoder({label: 'MarchingCube::Generator'});
+    const commandEncoder = this.device.createCommandEncoder({label: 'MarchingCubes::Generator::CommandEncoder'});
     {
       Utils.setComputePass(commandEncoder, this.passInfo.buildDensityVolume, extraBindGroups);
       
@@ -472,18 +472,18 @@ function buildDensityVolume_PassInfo(
   chunkBindGroupLayout, 
   densityTexture
 ) {
-  const label = 'Build Density Volume';
+  const label = 'MarchingCubes::Pass::BuildDensityVolume';
 
   const workgroupSize = [4, 4, 4]
   const gridSize = [kDensityVolumeTexRes, kDensityVolumeTexRes, kDensityVolumeTexRes];
   const workgroupCount = Utils.getWorkgroupCount(gridSize, workgroupSize);
 
   const computeShaderCode = `
-    override kChunkDim: f32 = ${kChunkDim};
+    override kChunkDim: f32 = f32(${kChunkDim});
     override kInvChunkDim: f32 = ${1.0 / kChunkDim};
     override kInvChunkDimMinusOne: f32 = ${1.0 / (kChunkDim - 1.0)};
-    override kChunkMargin: f32 = ${kChunkMargin};
-    override kChunkSize: f32 = ${kChunkSize};
+    override kChunkMargin: f32 = f32(${kChunkMargin});
+    override kChunkSize: f32 = f32(${kChunkSize});
 
     // ----
 
@@ -570,14 +570,14 @@ function listNonEmptyCells_PassInfo(
   nonEmptyCellsBuffer,
   atomicCountBuffer,
 ) {
-  const label = 'listNonEmptyCells';
+  const label = 'MarchingCubes::Pass::ListNonEmptyCells';
 
   const workgroupSize = [4, 4, 4];
   const gridSize = [kChunkDim, kChunkDim, kChunkDim]; //
   const workgroupCount = Utils.getWorkgroupCount(gridSize, workgroupSize);
 
   const computeShaderCode = `
-    override kChunkMargin: f32 = ${kChunkMargin};
+    override kChunkMargin: f32 = f32(${kChunkMargin});
     override kTexelSize: f32 = ${kTexelSize};
 
     @group(0) @binding(0) var uSamplerNearest: sampler;
@@ -586,7 +586,7 @@ function listNonEmptyCells_PassInfo(
     @group(0) @binding(3) var<storage, read_write> atomicCount: atomic<u32>;
 
     fn sampleNearest(uvw: vec3f) -> f32 {
-      return textureSampleLevel(uDensityTexture, uSamplerNearest, uvw, 0, vec3i(0)).r;
+      return textureSampleLevel(uDensityTexture, uSamplerNearest, uvw, 0.0).r;
     }
 
     @compute @workgroup_size(${workgroupSize})
@@ -715,7 +715,7 @@ function listVerticesToGenerate_PassInfo(
   atomicCountBuffer,
   indirectBuffer,
 ) {
-  const label = 'listVerticesToGenerate';
+  const label = 'MarchingCubes::Pass::ListVerticesToGenerate';
 
   const workgroupSize = [kMaxLinearGroupSize]; 
 
@@ -757,7 +757,7 @@ function listVerticesToGenerate_PassInfo(
       for (var i = 0; i < 3; i += 1) {
         if (vertOnEdges[i]) {
           outVerticesToGenerate[out_index] = pack4xU8(vec4u(coords, edge_nums[i]));
-          out_index += 1;
+          out_index += 1u;
         }
       }
     }
@@ -840,7 +840,7 @@ function splatVertexIndices_PassInfo(
   vertexIndicesVolume,
   indirectBuffer,
 ) {
-  const label = 'splatVertexIndices';
+  const label = 'MarchingCubes::Pass::SplatVertexIndices';
   const workgroupSize = [kMaxLinearGroupSize];
 
   const computeShaderCode = `
@@ -945,7 +945,7 @@ function setupIndirectBuffer_PassInfo(
   console.assert(indirectBuffer !== undefined);
   console.assert(targetGroupSize !== undefined);
 
-  const label = 'setupIndirectBuffer';
+  const label = 'MarchingCubes::Pass::SetupIndirectBuffer';
   const workgroupCount = [1, 1, 1];
 
   const computeShaderCode = `
@@ -1023,7 +1023,7 @@ function generateVertices_PassInfo(
   verticesToGenerateBuffer,
   indirectBuffer,
 ) {
-  const label = 'Generate Vertices';
+  const label = 'MarchingCubes::Pass::GenerateVertices';
 
   const workgroupSize = [kMaxLinearGroupSize];
 
@@ -1032,7 +1032,7 @@ function generateVertices_PassInfo(
     override kInvWindowDimMinusOne: f32 = ${1.0 / (kWindowDim - 1)};
     override kVoxelSizeWS: f32 = ${(kChunkSize / (kChunkDim - 1.0))};
     override kTexelSize: f32 = ${kTexelSize}; //
-    override kChunkMargin: f32 = ${kChunkMargin};
+    override kChunkMargin: f32 = f32(${kChunkMargin});
 
     ${MarchingCubeData.Shader_EdgesConstants}
 
@@ -1078,11 +1078,11 @@ function generateVertices_PassInfo(
     // ------------------
 
     fn sampleNearest(uvw: vec3f) -> f32 {
-      return textureSampleLevel(uDensityTexture, uSamplerNearest, uvw, 0, vec3i(0)).r;
+      return textureSampleLevel(uDensityTexture, uSamplerNearest, uvw, 0.0).r;
     }
 
     fn sampleLinear(uvw: vec3f) -> f32 {
-      return textureSampleLevel(uDensityTexture, uSamplerLinear, uvw, 0, vec3i(0)).r; 
+      return textureSampleLevel(uDensityTexture, uSamplerLinear, uvw, 0.0).r; 
     }
 
     fn sampleGradient(uvw: vec3f, offset: vec3f) -> f32 {
@@ -1105,24 +1105,24 @@ function generateVertices_PassInfo(
     fn calculateAO(uvw: vec3f, n: vec3f) -> f32 {
       var ao = 1.0;
       
-      let kAORayCount: u32 = 64;
-      let kAOStepCount: u32 = 16;
+      let kAORayCount: u32 = 64u;
+      let kAOStepCount: u32 = 16u;
       let kRayStartOffset: f32 = 1.75;
 
-      for (var i: u32 = 0; i < kAORayCount; i += 1) {
-        let ray_dir = kSphereRays64[i];
-        let ray_start = uvw;
-        let ray_step = ray_dir * (1.0 * kTexelSize / f32(kAOStepCount)); //
+      for (var i: u32 = 0u; i < kAORayCount; i += 1u) {
+        let ray_dir: vec3f = kSphereRays64[i];
+        let ray_start: vec3f = uvw;
+        let ray_step: vec3f = ray_dir * (kTexelSize / f32(kAOStepCount)); //
 
-        var ray_ao = 1.0;
+        var ray_ao: f32 = 1.0;
 
         // Sample density texture.
         var ray_curr = fma(vec3f(kRayStartOffset * kTexelSize), ray_dir, ray_start);
-        for (var j: u32 = 0; j < kAOStepCount; j += 1) {
+        for (var j: u32 = 0u; j < kAOStepCount; j += 1u) {
           ray_curr += ray_step;
-          let density = sampleLinear(ray_curr);
-          let coeff = (4.5 * density) * kAOWeights[j];
-          ray_ao = smoothstep(0, ray_ao, coeff);
+          let density: f32 = sampleLinear(ray_curr);
+          let coeff: f32 = (4.5 * density) * kAOWeights[j];
+          ray_ao = smoothstep(0.0, ray_ao, coeff);
         }
 
         ao += (1.0 - smoothstep(pow(ray_ao, 400.0), 1.0, dot(ray_dir, n)));
@@ -1176,8 +1176,8 @@ function generateVertices_PassInfo(
       let v: Vertex = place_vertex_on_edge(coordsWS, texcoord, edge);
 
       let out_index: u32 = 2u * vertex_id;
-      outVertices[out_index + 0] = vec4f(v.position, v.ao);
-      outVertices[out_index + 1] = vec4f(v.normal, 0);
+      outVertices[out_index + 0u] = vec4f(v.position, v.ao);
+      outVertices[out_index + 1u] = vec4f(v.normal, 0.0);
     }
   `;
 
@@ -1198,8 +1198,8 @@ function generateVertices_PassInfo(
         binding: 2,
         visibility: GPUShaderStage.COMPUTE,
         texture: {
-          viewDimension: '3d',
           sampleType: 'float',
+          viewDimension: '3d',
           multisampled: false,
         }
       },
@@ -1265,7 +1265,7 @@ function generateIndices_PassInfo(
   atomicCountBuffer,
   indirectBuffer,
 ) {
-  const label = 'generateIndices';
+  const label = 'MarchingCubes::Pass::GenerateIndices';
 
   const workgroupSize = [kMaxLinearGroupSize];
 

@@ -61,8 +61,8 @@ export const SignedDistanceFunctions = `
 // Simplex Perlin Noise based on Stefan Gustavson & Ian McEwan implementation.
 
 export const SimplexPerlinNoise = `
-      override kPerlinNoisePermutationSeed: f32 = 0;
-      override kNoiseTileRes: f32 = 512;
+      override kPerlinNoisePermutationSeed: f32 = 0.0;
+      override kNoiseTileRes: f32 = 512.0;
       override kNoiseEnableTiling: bool = false;
 
 

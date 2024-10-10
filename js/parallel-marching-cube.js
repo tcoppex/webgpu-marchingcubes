@@ -8,7 +8,7 @@ import PerfLogger from './PerfLogger.js';
 
 // ----------------------------------------------------------------------------
 
-const kChunkDim = 16;
+const kChunkDim = 24;
 const kVoxelsPerSlice = kChunkDim * kChunkDim;
 const kVoxelsPerChunk = kVoxelsPerSlice * kChunkDim;
 

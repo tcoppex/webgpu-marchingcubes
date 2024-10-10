@@ -272,12 +272,10 @@ export class Generator {
       Utils.resetStorage(this.device, this.buffer.atomicCountVertices);
       Utils.resetStorage(this.device, this.buffer.atomicCountIndices);
 
+      // [debug]
       Utils.resetStorage(this.device, this.buffer.nonEmptyCells); //
       Utils.resetStorage(this.device, this.buffer.verticesToGenerate); //
-      Utils.resetStorage(this.device, this.buffer.vertices); //
-      Utils.resetStorage(this.device, this.buffer.indices); //
-
-      Utils.clearTexture(this.device, this.vertexIndicesVolume); // [debug]
+      Utils.clearTexture(this.device, this.vertexIndicesVolume); //
     }
 
     const extraBindGroups = [chunk.bindGroupInfo, this.densityBindGroupInfo];
@@ -429,6 +427,13 @@ class Grid {
     if (this.buffer == null) {
       await this.init();
     }
+
+    // ---------
+    // [debug]
+    Utils.resetStorage(this.generator.device, this.buffer.vertices); //
+    Utils.resetStorage(this.generator.device, this.buffer.indices); //
+    // ---------
+
     for (let chunk_id in this.chunks) {
       this.generator.buildChunk(this.chunks[chunk_id], this.buffer.drawIndexedIndirect);
     }

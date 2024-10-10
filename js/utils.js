@@ -145,6 +145,7 @@ export function createTexture(device, imageBitmap, imageFormat = 'rgba8unorm') {
     textureDescriptor.size
   );
 
+  // [not very efficient as generateMipmap recreate a pipeline everytime]
   if (mipLevelCount > 1) {
     generateMipmap(device, texture, textureDescriptor);
   }

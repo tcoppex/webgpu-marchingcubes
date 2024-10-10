@@ -9,6 +9,7 @@
     body, html {
       margin: 0;
       padding: 0;
+      width: 100%;
       height: 100%;
       display: flex;
       justify-content: center;
@@ -75,8 +76,8 @@
         let t = 1.0 - c;
         
         return mat3x3f(
-          t * axis.x * axis.x + c, t * axis.x * axis.y - s * axis.z,  t * axis.x * axis.z + s * axis.y,
-          t * axis.x * axis.y + s * axis.z,  t * axis.y * axis.y + c,        t * axis.y * axis.z - s * axis.x,
+          t * axis.x * axis.x + c,           t * axis.x * axis.y - s * axis.z,  t * axis.x * axis.z + s * axis.y,
+          t * axis.x * axis.y + s * axis.z,  t * axis.y * axis.y + c,           t * axis.y * axis.z - s * axis.x,
           t * axis.x * axis.z - s * axis.y,  t * axis.y * axis.z + s * axis.x,  t * axis.z * axis.z + c
         );
       }
@@ -102,7 +103,7 @@
 
         d = opSmoothUnion(
           d,
-          sdTorus(p, vec2f((2.1 + 0.0 * sineTime)*radius, 2.0f + uAttributes.ringVariation * sineTime)),
+          sdTorus(p, vec2f(2.1 * radius, 2.0 + uAttributes.ringVariation * sineTime)),
           1.0 - uAttributes.unionSmoothness
         );
 
@@ -699,28 +700,32 @@
       await generator.init(device, density);
       await grid.init();
 
-      // --------------
-
       let firstTick = Date.now() / 1000.0;
       let lastTick = firstTick;
+
+      // --------------
 
       function frame() {
         const tick = Date.now() / 1000.0;
         const dt = tick - lastTick;
         const elapsedTime = tick - firstTick;
         lastTick = tick;
-
+        
         const densityAtttribs = new Float32Array([
           elapsedTime,
           uiParams.unionSmoothness,
           uiParams.ringVariation,
           uiParams.rotationSpeed,
         ]);
-        device.queue.writeBuffer(density_uniformBuffer, 0, densityAtttribs.buffer, densityAtttribs.byteOffset, densityAtttribs.byteLength);
-        
-        camera.update(dt);
+        device.queue.writeBuffer(
+          density_uniformBuffer, 
+          0, 
+          densityAtttribs.buffer, 
+          densityAtttribs.byteOffset, 
+          densityAtttribs.byteLength
+        );
 
-        // Update uniform device buffer.
+        camera.update(dt);
         uniformData.set(modelMatrix, 0);
         uniformData.set(camera.viewproj(), modelMatrix.length);
         uniformData.set(camera.position(), modelMatrix.length * 2)

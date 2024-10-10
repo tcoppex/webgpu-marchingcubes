@@ -63,11 +63,13 @@ export class Generator {
 
     this.device = device;
 
+    // ----
     this.densityBindGroupInfo = {
-      index: 2, 
+      index: 2,  //
       bindGroup: density.bindGroup,
       dynamicOffsets: [],
     };
+    // ----
 
     // Output buffers.
     const [nonEmptyCells, verticesToGenerate] = await Promise.all([
@@ -176,7 +178,7 @@ export class Generator {
     });
 
     // ---------------------------
-    
+
     this.passInfo = {
       buildDensityVolume: buildDensityVolume_PassInfo(
         this.device,
@@ -244,8 +246,7 @@ export class Generator {
         this.buffer.indirectVertices,
         kMaxLinearGroupSize,
       ),
-      
-    }
+    };
   }
 
   release() {
@@ -345,7 +346,7 @@ class Grid {
       for (let j = 0; j < Y; ++j) {
         for (let i = 0; i < X; ++i) {
           const coords = [i, j, k];
-          const coordsWS = coords.map((d, idx) => kChunkSize * (startPosition[idx] + 1.0 * d));
+          const coordsWS = coords.map((d, idx) => kChunkSize * (startPosition[idx] + d));
           const offsets = {
             vertex: index * this.vertexBufferStride,
             index: index * this.indexBufferStride,

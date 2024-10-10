@@ -1,6 +1,6 @@
 # webgpu-marchingcubes
 
-Dynamic marching cubes mesh generation via signed distant function in WebGPU.
+Dynamic marching cubes mesh generation via signed distant function in WebGPU. 
 
 ### Input Controls
 

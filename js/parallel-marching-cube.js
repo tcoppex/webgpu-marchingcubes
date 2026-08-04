@@ -74,7 +74,7 @@ export class Generator {
     // Output buffers.
     const [nonEmptyCells, verticesToGenerate] = await Promise.all([
       Utils.createStorage(this.device, kHeuristicMaxNonEmptyCellsSize, `nonEmptyCells`),
-      Utils.createStorage(this.device, kHeuristicMaxNonEmptyCellsSize * 3, `verticesToGenerate`),
+      Utils.createStorage(this.device, kHeuristicMaxNonEmptyCellsSize * 4 * 3, `verticesToGenerate`),
     ]);
     const [atomicCountCells, atomicCountVertices, atomicCountIndices] = await Promise.all([
       Utils.createStorage(this.device, Uint32Array.BYTES_PER_ELEMENT, `atomicCountCells`, GPUBufferUsage.COPY_SRC),
@@ -727,7 +727,7 @@ function listVerticesToGenerate_PassInfo(
   const computeShaderCode = `
     @group(0) @binding(0) var<storage> inNumCells: u32;
     @group(0) @binding(1) var<storage> inNonEmptyCells: array<u32>;
-    @group(0) @binding(2) var<storage, read_write> outVerticesToGenerate: array<u32>;
+    @group(0) @binding(2) var<storage, read_write> outVerticesToGenerate: array<vec4u>;
     @group(0) @binding(3) var<storage, read_write> atomicCount: atomic<u32>;
 
     @compute @workgroup_size(${workgroupSize})
@@ -761,7 +761,7 @@ function listVerticesToGenerate_PassInfo(
       let edge_nums = vec3u(3, 0, 8);
       for (var i = 0; i < 3; i += 1) {
         if (vertOnEdges[i]) {
-          outVerticesToGenerate[out_index] = pack4xU8(vec4u(coords, edge_nums[i]));
+          outVerticesToGenerate[out_index] = vec4u(coords, edge_nums[i]);
           out_index += 1u;
         }
       }
@@ -850,7 +850,7 @@ function splatVertexIndices_PassInfo(
 
   const computeShaderCode = `
     @group(0) @binding(0) var<storage> inVertexCount: u32;
-    @group(0) @binding(1) var<storage> inVerticesToGenerate: array<u32>;
+    @group(0) @binding(1) var<storage> inVerticesToGenerate: array<vec4u>;
     @group(0) @binding(2) var outVertexIndicesVolume: texture_storage_3d<${vertexIndicesVolume.format}, write>;
 
     @compute @workgroup_size(${workgroupSize})
@@ -863,7 +863,7 @@ function splatVertexIndices_PassInfo(
         return;
       }
 
-      let data: vec4u = unpack4xU8(inVerticesToGenerate[vertex_id]);
+      let data: vec4u = inVerticesToGenerate[vertex_id];
       let edge: u32 = data.w & 0xf;
 
       // [!] Use a single component texture with 3*width instead of a RGB texture
@@ -1075,7 +1075,7 @@ function generateVertices_PassInfo(
     @group(0) @binding(1) var uSamplerLinear: sampler;
     @group(0) @binding(2) var uDensityTexture: texture_3d<f32>;
     @group(0) @binding(3) var<storage> inNumVertices: u32;
-    @group(0) @binding(4) var<storage> inVerticesToGenerateBuffer: array<u32>;
+    @group(0) @binding(4) var<storage> inVerticesToGenerateBuffer: array<vec4u>;
 
     @group(1) @binding(0) var<storage, read_write> outVertices: array<vec4f>;
     @group(1) @binding(2) var<uniform> inChunkAttributes: vec4f;
@@ -1171,7 +1171,7 @@ function generateVertices_PassInfo(
         return;
       }
 
-      let data: vec4u = unpack4xU8(inVerticesToGenerateBuffer[vertex_id]);
+      let data: vec4u = inVerticesToGenerateBuffer[vertex_id];
       let coords: vec3f = vec3f(data.xyz);
       let edge: u32 = data.w;
 

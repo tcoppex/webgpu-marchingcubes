@@ -2,6 +2,22 @@
 
 Dynamic marching cubes mesh generation via signed distant function in WebGPU. 
 
+### Quickstart
+
+To run locally you'll need to generate a PEM encoded SSL certificate and private key, then run an https server with those certificates:
+
+```bash
+MSYS_NO_PATHCONV=1 openssl req -x509 -newkey rsa:2048 -nodes \
+  -keyout localhost-key.pem \
+  -out localhost.pem \
+  -days 365 \
+  -subj "/CN=localhost" \
+  -addext "subjectAltName=DNS:localhost,IP:127.0.0.1"
+
+
+http-server -S -C localhost.pem -K localhost-key.pem -p 8443
+```
+
 ### Input Controls
 
 * Mouse right click to rotate.

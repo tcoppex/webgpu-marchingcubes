@@ -865,11 +865,12 @@ function splatVertexIndices_PassInfo(
 
       let data: vec4u = unpack4xU8(inVerticesToGenerate[vertex_id]);
       let edge: u32 = data.w & 0xf;
+      let axis_offset: u32 = select(select(0u, 1u, edge == 0u), 2u, edge == 8u);
 
       // [!] Use a single component texture with 3*width instead of a RGB texture
       //     to avoid concurrent writing on the same texel.
       var coords: vec3u = data.xyz;
-      coords.x = 3u * coords.x + u32(select(select(0u, 1u, edge == 0u), 2u, edge == 8u));
+      coords.x = 3u * coords.x + axis_offset;
 
       textureStore(outVertexIndicesVolume, coords, vec4u(vertex_id, 0u, 0u, 0u));
     }
